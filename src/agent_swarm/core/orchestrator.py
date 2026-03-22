@@ -170,14 +170,18 @@ class Orchestrator:
 
         for batch in execution_order:
             coros = []
+            scheduled_ids = []
             for node_id in batch:
                 node = workflow.nodes[node_id]
                 agent = self._select_agent(node.agent_role)
                 if agent:
                     task = Task(description=node.task)
                     coros.append(self._execute_task(task, agent))
+                    scheduled_ids.append(node_id)
+                else:
+                    logger.warning(f"No agent available for node {node_id} (role={node.agent_role}), skipping")
             batch_results = await asyncio.gather(*coros, return_exceptions=True)
-            for node_id, result in zip(batch, batch_results):
+            for node_id, result in zip(scheduled_ids, batch_results):
                 results[node_id] = result
 
         return results
