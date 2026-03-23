@@ -99,39 +99,42 @@ class Orchestrator:
     async def _execute_task(self, task: Task, agent: BaseAgent) -> Any:
         """Execute a single task with an agent."""
         async with self._semaphore:
-            task.status = TaskStatus.RUNNING
-            task.assigned_agent = agent.agent_id
-            agent.status = AgentStatus.BUSY
+            while True:
+                task.status = TaskStatus.RUNNING
+                task.assigned_agent = agent.agent_id
+                agent.status = AgentStatus.BUSY
 
-            try:
-                await agent.initialize()
-                plan = await agent.plan(task.description)
-                result = await asyncio.wait_for(
-                    agent.execute(plan),
-                    timeout=self.config.task_timeout,
-                )
-                reflection = await agent.reflect(result)
-                task.status = TaskStatus.COMPLETED
-                task.result = {"output": result, "reflection": reflection}
-                logger.info(f"Task {task.id} completed by {agent.agent_id}")
-                return result
+                try:
+                    await agent.initialize()
+                    plan = await agent.plan(task.description)
+                    result = await asyncio.wait_for(
+                        agent.execute(plan),
+                        timeout=self.config.task_timeout,
+                    )
+                    reflection = await agent.reflect(result)
+                    task.status = TaskStatus.COMPLETED
+                    task.result = {"output": result, "reflection": reflection}
+                    logger.info(f"Task {task.id} completed by {agent.agent_id}")
+                    return result
 
-            except asyncio.TimeoutError:
-                task.error = "Task timed out"
-                task.status = TaskStatus.FAILED
-                logger.error(f"Task {task.id} timed out")
-            except Exception as e:
-                task.error = str(e)
-                if task.retries < task.max_retries:
-                    task.retries += 1
-                    task.status = TaskStatus.RETRYING
-                    logger.warning(f"Task {task.id} failed, retrying ({task.retries}/{task.max_retries})")
-                    await asyncio.sleep(self.config.retry_delay)
-                    return await self._execute_task(task, agent)
-                task.status = TaskStatus.FAILED
-                logger.error(f"Task {task.id} failed permanently: {e}")
-            finally:
-                agent.status = AgentStatus.IDLE
+                except asyncio.TimeoutError:
+                    task.error = "Task timed out"
+                    task.status = TaskStatus.FAILED
+                    logger.error(f"Task {task.id} timed out")
+                    break
+                except Exception as e:
+                    task.error = str(e)
+                    if task.retries < task.max_retries:
+                        task.retries += 1
+                        task.status = TaskStatus.RETRYING
+                        logger.warning(f"Task {task.id} failed, retrying ({task.retries}/{task.max_retries})")
+                        await asyncio.sleep(self.config.retry_delay)
+                        continue  # Retry within the same semaphore acquisition
+                    task.status = TaskStatus.FAILED
+                    logger.error(f"Task {task.id} failed permanently: {e}")
+                    break
+                finally:
+                    agent.status = AgentStatus.IDLE
         return None
 
     async def execute(self, description: str, **kwargs: Any) -> Any:

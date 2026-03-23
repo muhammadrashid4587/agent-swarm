@@ -58,10 +58,13 @@ class MessageBus:
         if len(self._history) > self._max_history:
             self._history = self._history[-self._max_history:]
 
-        handlers = self._subscribers.get(message.topic, []) + self._wildcard_subscribers
+        exact_handlers = self._subscribers.get(message.topic, [])
+        handlers = list(exact_handlers) + list(self._wildcard_subscribers)
 
         # Also match prefix patterns (e.g., "agent.*" matches "agent.abc123")
         for pattern, subs in self._subscribers.items():
+            if pattern == message.topic:
+                continue  # Already included from exact match above
             if pattern.endswith(".*") and message.topic.startswith(pattern[:-2]):
                 handlers.extend(subs)
 
